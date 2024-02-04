@@ -37,6 +37,11 @@ String s;
 // lookup table based on the regression we found on the PWM values with a bit of manual adjustment
 const int speedometer_values[] = {24, 25, 26, 26, 27, 28, 29, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 45, 46, 47, 48, 50, 51, 53, 54, 56, 57, 59, 61, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 85, 87, 89, 92, 94, 97, 100, 103, 106, 109, 112, 115, 118, 121, 125, 128, 132, 136, 139, 143, 147, 152, 156, 160, 165, 169, 174, 179, 184, 186, 190, 194, 198, 203, 207, 212};
 
+const int n_pins = 20;
+const int pins[] = {
+  STOP, LED_0, LED_10, LED_15, LED_18, LED_25, LED_40, LED_50, LED_55, LED_60, YARD_10, MAN_RL, UMAN_RL, BYPASS, LW_40, W_40, G_ATO, Y_MAN, LOC, REMOTE
+};
+
 int mph_to_pwm(int mph) {
   if(mph > 80) {
     return speedometer_values[80]; // clamp to max
@@ -53,6 +58,10 @@ void io_write(uint8_t pin, uint8_t highLow) {
   }else {
     io0.digitalWrite(pin, highLow);
   }
+}
+
+uint8_t io_read(uint8_t pin) {
+  return (pin > 15 ? io1 : io0).digitalRead(pin % 16);
 }
 
 void io_mode(uint8_t pin, uint8_t inOut) {
@@ -119,6 +128,8 @@ void setup() {
   io_write(LW_40, LOW);
   io_write(G_ATO, LOW);
   io_write(Y_MAN, LOW);
+  io_write(LOC, LOW);
+  io_write(REMOTE, LOW);
 }
 
 void speedometer_sweep() {
@@ -169,42 +180,46 @@ void speedometer_sweep() {
   delay(2500);
 }
 
-void loop() {
-  // put your main code here, to run repeatedly:
-  /*if(digitalRead(4) == HIGH) {
-    delay(30);
-    state = !state;
-    digitalWrite(2, state? HIGH:LOW);
-    digitalWrite(3, state? LOW:HIGH);
-    while(digitalRead(4) == HIGH) {}
+void lamp_test() {
+  for(int i = 0; i < n_pins; ++i) {
+    io_write(pins[i], HIGH);
   }
-  delay(30);*/
+  delay(5000);
+  for(int i = 0; i < n_pins; ++i) {
+    io_write(pins[i], LOW);
+  }
+}
 
-  /*
-  io.digitalWrite(LED_0,  HIGH);
-  io.digitalWrite(LED_10, HIGH);
-  io.digitalWrite(LED_15, HIGH);
-  io.digitalWrite(LED_18, HIGH);
-  io.digitalWrite(LED_25, HIGH);
-  io.digitalWrite(LED_40, HIGH);
-  io.digitalWrite(LED_50, HIGH);
-  io.digitalWrite(LED_55, HIGH);
-  io.digitalWrite(LED_60, HIGH);
-  */
-
+void serial_lamp_test() {
   s = Serial.readStringUntil('\n');
+  if(s == "all") { return lamp_test(); }
+  if(s == "inp") { return inputs_test(); }
+  
   if(s.toInt() > 0) {
     io_write(s.toInt(), HIGH);
     delay(5000);
     io_write(s.toInt(), LOW);
   }
-/*  for(i = 20; i < 180;) {
-    analogWrite(AMMETER, i);
-    delay(500);
-    if(i > 120) { i += 4; }
-    else if(i > 60) { i += 2; }
-    else { i += 1; }
-  }*/
+}
 
-  //speedometer_sweep();
+void inputs_test() {
+  bool states[] = { false, false, false, false };
+  int ipins[] = { B_DEPART, ATO_MAN };
+  int n_ipins = 2;
+
+  Serial.write("start input test\n");
+  for(int i = 0; i < 3000; ++i) {
+    delay(5);
+    for(int i = 0; i < n_ipins; ++i) {
+      bool before = states[i];
+      bool after = (io_read(ipins[i]) == HIGH);
+      if(before != after) { Serial.write("pin "); Serial.write(String(i).c_str()); Serial.write(after ? " high" : " low"); Serial.write("\n"); }
+      states[i] = after;
+    }
+  }
+  Serial.write("end input test\n");
+}
+
+void loop() {
+  serial_lamp_test();
 }
