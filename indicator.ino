@@ -194,6 +194,7 @@ void serial_lamp_test() {
   s = Serial.readStringUntil('\n');
   if(s == "all") { return lamp_test(); }
   if(s == "inp") { return inputs_test(); }
+  if(s == "speed") { return speedometer_sweep(); }
   
   if(s.toInt() > 0) {
     io_write(s.toInt(), HIGH);
