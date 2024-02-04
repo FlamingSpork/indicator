@@ -35,7 +35,7 @@ String s;
 #define AMMETER 5
 
 // lookup table based on the regression we found on the PWM values with a bit of manual adjustment
-const int speedometer_values[] = {24, 25, 26, 26, 27, 28, 29, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 45, 46, 47, 48, 50, 51, 53, 54, 56, 57, 59, 61, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 85, 87, 89, 92, 94, 97, 100, 103, 106, 109, 112, 115, 118, 121, 125, 128, 132, 136, 139, 143, 147, 152, 156, 160, 165, 169, 174, 179, 184, 186, 190, 194, 198, 203, 207, 212};
+const int speedometer_values[] = {24, 25, 26, 26, 27, 28, 29, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 45, 46, 47, 48, 50, 51, 53, 54, 56, 57, 59, 61, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 85, 87, 89, 92, 94, 97, 100, 103, 106, 109, 112, 115, 118, 121, 125, 128, 132, 136, 139, 143, 147, 152, 156, 160, 165, 169, 174, 179, 184, 189, 195, 200, 206, 212, 218, 224};
 
 const int n_pins = 20;
 const int pins[] = {
@@ -76,7 +76,7 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
   pinMode(AMMETER, OUTPUT);
-  analogWrite(AMMETER, 50);
+  analogWrite(AMMETER, 0);
   val = 0;
 
   Wire.begin();
