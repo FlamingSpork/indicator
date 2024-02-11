@@ -1,29 +1,46 @@
 import collections
+import functools
 import json
 import math
+import sys
+import time
 from decimal import Decimal
 
+import obd
+import paho.mqtt
 import paho.mqtt.client
 from lxml import etree
 from numpy import arccos, array, cross, dot, pi
-from numpy.linalg import det, norm
+from numpy.linalg import norm
+
+from ..adu import ADU
 
 LOOKUP_PREC = 3
-NEIGHBORS = [
-    (-1, -1),
-    (-1, 0),
-    (-1, 1),
-    (0, -1),
-    (0, 0),
-    (0, 1),
-    (1, -1),
-    (1, 0),
-    (1, 1),
-]
+NEIGHBORS = [(x, y) for x in range(-2, 3) for y in range(-2, 3)]
 
 
 nodes = {}
 squares = collections.defaultdict(set)
+
+
+def timed(desc):
+    def dec(__f):
+        @functools.wraps(__f)
+        def decorated(*a, **k):
+            start = time.time()
+            result = __f(*a, **k)
+            length = time.time() - start
+
+            if length < 1:
+                print(f"{desc} took {round(length * 1_000, 3)}ms", file=sys.stderr)
+            else:
+                print(f"{desc} took {round(length, 3)}s", file=sys.stderr)
+
+            return result
+
+        return decorated
+
+    return dec
 
 
 def degrees_to_radians(degrees):
@@ -77,6 +94,7 @@ class Point:
     def grid_square(self):
         return (int(self.lon * 10**LOOKUP_PREC), int(self.lat * 10**LOOKUP_PREC))
 
+    @functools.cache
     def nearby_nodes(self):
         thisx, thisy = self.grid_square()
 
@@ -91,6 +109,7 @@ class Point:
         result = [(d, k) for (d, k) in result]  # could filter by distance here
         return result
 
+    @functools.cache
     def nearby_ways(self):
         seen_ways = {}
         done_ways = set()
@@ -116,6 +135,9 @@ class Point:
 
     def __repr__(self):
         return f"Point({self.lat}, {self.lon})"
+
+    def __hash__(self):
+        return hash((self.lon, self.lat))
 
 
 class Node(Point):
@@ -162,40 +184,59 @@ class Way:
         return f"Way<{self.wid=}, {len(self.nodes)=}, {self.tags!r}>"
 
 
+@timed("snap to way")
 def snap_to_way(pts):
+    ways = collections.Counter()
     way_dists = collections.defaultdict(list)
 
+    min_dists = []
+    for pt in pts:
+        near_ways = pt.nearby_ways()
+        if near_ways:
+            min_dists.append(near_ways[0][0])
+
+    threshold = max(min_dists) * 2
     for pt in pts:
         for dist, way in pt.nearby_ways():
+            if dist > threshold:
+                continue
+
+            ways[way] += 1
             way_dists[way].append(dist)
 
     result = []
 
-    for way, dists in way_dists.items():
-        result.append((sum(dist**2 for dist in dists), way))
+    most_frequent_count = max(ways.values())
+    frequent_ways = [
+        way for (way, count) in ways.items() if count == most_frequent_count
+    ]
+
+    for way in frequent_ways:
+        result.append((sum(dist**2 for dist in way_dists[way]), way))
 
     result.sort(key=lambda k: k[0])
     return result
 
 
-with open("highways.osm") as f:
-    et = etree.parse(f)
+@timed("build tree")
+def build_tree():
+    with open("driver/osm/highways.osm") as f:
+        et = etree.parse(f)
 
-    for el in et.getroot():
-        if el.tag == "relation":
-            continue
+        for el in et.getroot():
+            if el.tag == "relation":
+                continue
 
-        elif el.tag == "node":
-            it = dict(el.items())
-            Node(it["lat"], it["lon"], it["id"]).save()
+            elif el.tag == "node":
+                it = dict(el.items())
+                Node(it["lat"], it["lon"], it["id"]).save()
 
-        elif el.tag == "way":
-            Way(el).update_nodes()
+            elif el.tag == "way":
+                Way(el).update_nodes()
 
-
-print("loaded OSM data")
 
 points = []
+adu = ADU("/dev/ttyUSB0")
 
 
 def on_position(_client, _userdata, msg):
@@ -203,23 +244,69 @@ def on_position(_client, _userdata, msg):
     if data["_type"] != "location":
         return
 
+    if points:
+        if dist((points[-1].lon, points[-1].lat), (data["lon"], data["lat"])) <= 10:
+            return
+
     points.append(Point(data["lat"], data["lon"]))
-    print("points are", points)
 
     if len(points) > 6:
         points.pop(0)
 
-    print(snap_to_way(points)[0])
+    ways = snap_to_way(points)
+    if ways:
+        way = ways[0][1]
+        name = way.tags.get("name", "(none)")
+        ref = way.tags.get("ref", "(none)")
+        speed = way.tags.get("maxspeed")
+
+        if speed:
+            speed = int(speed.split()[0])
+            adu.speed_lamps(speed, exact=True)
+        else:
+            adu.no_speed_lamps()
+
+        print("Found way")
+        print("WAY ID:", way.wid)
+        print("NAME:", name)
+        print("REF:", ref)
+        print("SPEED:", speed)
+        print("---")
 
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, _flags, _rc):
     print("connected to mqtt")
     client.subscribe("owntracks/tris/+")
 
 
-mqtt = paho.mqtt.client.Client()
-mqtt.on_connect = on_connect
-mqtt.on_message = on_position
+if __name__ == "__main__":
+    mqtt = paho.mqtt.client.Client(paho.mqtt.client.CallbackAPIVersion.VERSION1)
+    mqtt.on_connect = on_connect
+    mqtt.on_message = on_position
 
-mqtt.connect("trisfyi", 1883)
-mqtt.loop_forever()
+    build_tree()
+
+    mqtt.connect("trisfyi", 1883)
+    adu.connect()
+
+    obdc = obd.OBD("/dev/rfcomm1", fast=False, start_low_power=True)
+    if obdc.status() == obd.OBDStatus.NOT_CONNECTED:
+        sys.exit(4)
+
+    speed = obdc.query(obd.commands.SPEED)
+    print("obd speed is", speed)
+
+    while True:
+        adu.on_lamp(18)
+        adu.on_lamp(19)
+        speed = obdc.query(obd.commands.SPEED)
+
+        if speed.value is None:
+            print("obd reconnect")
+            obdc = obd.OBD("/dev/rfcomm1", fast=False, start_low_power=True)
+            continue
+
+        adu.set_speed(int(round(speed.value.to("mph").m)))
+        mqtt.loop()
+
+        time.sleep(0.1)
