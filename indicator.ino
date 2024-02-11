@@ -26,12 +26,10 @@ String s;
 #define LW_40   13 // blank left of W/40
 #define G_ATO   12
 #define Y_MAN   16 // yellow MAN of MAN/ATO; io1 pin 0
-#define LOC     17 // _probably_ LOC of LOC/REMOTE
-#define REMOTE  18 // _probably_ REMOTE of LOC/REMOTE
-#define B_DEPART 21 // ????
-#define ATO_MAN 22  // ???? very wrong
-#define MYSTERY1 23
-#define MYSTERY2 24
+#define LOC     17 // _probably_ LOC of LOC/REMOTE (burnt out)
+#define REMOTE  18 // REMOTE of LOC/REMOTE
+#define B_DEPART 21
+#define ATO_MAN 22
 
 // arduino PWM pin
 #define AMMETER 5
@@ -43,6 +41,9 @@ const int n_pins = 20;
 const int pins[] = {
   STOP, LED_0, LED_10, LED_15, LED_18, LED_25, LED_40, LED_50, LED_55, LED_60, YARD_10, MAN_RL, UMAN_RL, BYPASS, LW_40, W_40, G_ATO, Y_MAN, LOC, REMOTE
 };
+
+const int n_ipins = 2;
+const int ipins[] = { B_DEPART, ATO_MAN };
 
 int mph_to_pwm(int mph) {
   if(mph > 80) {
@@ -110,8 +111,6 @@ void setup() {
   io_mode(REMOTE, OUTPUT);
   io_mode(B_DEPART, INPUT);
   io_mode(ATO_MAN, INPUT);
-  io_mode(MYSTERY1, INPUT);
-  io_mode(MYSTERY2, INPUT);
 
   io_write(LED_0,  LOW);
   io_write(LED_10, LOW);
@@ -209,7 +208,6 @@ void serial_lamp_test() {
 
 void inputs_test() {
   bool states[] = { false, false, false, false };
-  int ipins[] = { B_DEPART, ATO_MAN, 23, 24 };
   int n_ipins = 4;
 
   Serial.write("start input test\n");
@@ -235,10 +233,10 @@ void interface() {
     Serial.read();
 
     if(cmd == '+') {
-      io_write(arg, HIGH);
+      io_write(pins[arg], HIGH);
     }
     else if(cmd == '-') {
-      io_write(arg, LOW);
+      io_write(pins[arg], LOW);
     }
     else if(cmd == '/') {
       analogWrite(AMMETER, arg);
@@ -247,7 +245,7 @@ void interface() {
       while(1) serial_lamp_test();
     }
     else if(cmd == '?') {
-      if(io_read(arg) == HIGH) {
+      if(io_read(ipins[arg]) == HIGH) {
         resp = '1';
       }
       else {
