@@ -30,6 +30,8 @@ String s;
 #define REMOTE  18 // _probably_ REMOTE of LOC/REMOTE
 #define B_DEPART 21 // ????
 #define ATO_MAN 22  // ???? very wrong
+#define MYSTERY1 23
+#define MYSTERY2 24
 
 // arduino PWM pin
 #define AMMETER 5
@@ -108,6 +110,8 @@ void setup() {
   io_mode(REMOTE, OUTPUT);
   io_mode(B_DEPART, INPUT);
   io_mode(ATO_MAN, INPUT);
+  io_mode(MYSTERY1, INPUT);
+  io_mode(MYSTERY2, INPUT);
 
   io_write(LED_0,  LOW);
   io_write(LED_10, LOW);
@@ -205,8 +209,8 @@ void serial_lamp_test() {
 
 void inputs_test() {
   bool states[] = { false, false, false, false };
-  int ipins[] = { B_DEPART, ATO_MAN };
-  int n_ipins = 2;
+  int ipins[] = { B_DEPART, ATO_MAN, 23, 24 };
+  int n_ipins = 4;
 
   Serial.write("start input test\n");
   for(int i = 0; i < 3000; ++i) {
@@ -221,6 +225,43 @@ void inputs_test() {
   Serial.write("end input test\n");
 }
 
+void interface() {
+  int cmd;
+  int arg;
+  int resp = '.';
+  if(Serial.available() >= 3) {
+    cmd = Serial.read();
+    arg = Serial.read();
+    Serial.read();
+
+    if(cmd == '+') {
+      io_write(arg, HIGH);
+    }
+    else if(cmd == '-') {
+      io_write(arg, LOW);
+    }
+    else if(cmd == '/') {
+      analogWrite(AMMETER, arg);
+    }
+    else if(cmd == '!') {
+      while(1) serial_lamp_test();
+    }
+    else if(cmd == '?') {
+      if(io_read(arg) == HIGH) {
+        resp = '1';
+      }
+      else {
+        resp = '0';
+      }
+    }
+    else {
+      resp = '?';
+    }
+    
+    Serial.write(resp);
+  }
+}
+
 void loop() {
-  serial_lamp_test();
+  interface();
 }
