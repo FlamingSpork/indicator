@@ -45,6 +45,8 @@ const int pins[] = {
 const int n_ipins = 2;
 const int ipins[] = { B_DEPART, ATO_MAN };
 
+bool output_states[n_pins];
+
 int mph_to_pwm(int mph) {
   if(mph > 80) {
     return speedometer_values[80]; // clamp to max
@@ -88,51 +90,16 @@ void setup() {
   Serial.print("io1: ");
   Serial.println(io1.begin(0x3F));
 
-  io_mode(LED_0,  OUTPUT);
-  io_mode(LED_10, OUTPUT);
-  io_mode(LED_15, OUTPUT);
-  io_mode(LED_18, OUTPUT);
-  io_mode(LED_25, OUTPUT);
-  io_mode(LED_40, OUTPUT);
-  io_mode(LED_50, OUTPUT);
-  io_mode(LED_55, OUTPUT);
-  io_mode(LED_60, OUTPUT);
-  io_mode(BEEPER, OUTPUT);
-  io_mode(STOP, OUTPUT);
-  io_mode(YARD_10, OUTPUT);
-  io_mode(MAN_RL, OUTPUT);
-  io_mode(UMAN_RL, OUTPUT);
-  io_mode(BYPASS, OUTPUT);
-  io_mode(W_40, OUTPUT);
-  io_mode(LW_40, OUTPUT);
-  io_mode(G_ATO, OUTPUT);
-  io_mode(Y_MAN, OUTPUT);
-  io_mode(LOC, OUTPUT);
-  io_mode(REMOTE, OUTPUT);
-  io_mode(B_DEPART, INPUT);
-  io_mode(ATO_MAN, INPUT);
+  for (int i=0; i<n_pins; i++) {
+    io_mode(pins[i], OUTPUT);
+    io_write(pins[i], LOW);
+    output_states[i] = 0;
+  }
 
-  io_write(LED_0,  LOW);
-  io_write(LED_10, LOW);
-  io_write(LED_15, LOW);
-  io_write(LED_18, LOW);
-  io_write(LED_25, LOW);
-  io_write(LED_40, LOW);
-  io_write(LED_50, LOW);
-  io_write(LED_55, LOW);
-  io_write(LED_60, LOW);
-  io_write(BEEPER, LOW);
-  io_write(STOP, LOW);
-  io_write(YARD_10, LOW);
-  io_write(MAN_RL, LOW);
-  io_write(UMAN_RL, LOW);
-  io_write(BYPASS, LOW);
-  io_write(W_40, LOW);
-  io_write(LW_40, LOW);
-  io_write(G_ATO, LOW);
-  io_write(Y_MAN, LOW);
-  io_write(LOC, LOW);
-  io_write(REMOTE, LOW);
+  for (int i=0; i<n_ipins; i++) {
+    io_mode(ipins[i], INPUT);
+  }
+
 }
 
 void speedometer_sweep() {
@@ -234,9 +201,11 @@ void interface() {
 
     if(cmd == '+') {
       io_write(pins[arg], HIGH);
+      output_states[arg] = 1;
     }
     else if(cmd == '-') {
       io_write(pins[arg], LOW);
+      output_states[arg] = 0;
     }
     else if(cmd == '/') {
       analogWrite(AMMETER, arg);
@@ -245,12 +214,15 @@ void interface() {
       while(1) serial_lamp_test();
     }
     else if(cmd == '?') {
-      if(io_read(ipins[arg]) == HIGH) {
+      if(io_read(ipins[arg]) == LOW) {
         resp = '1';
       }
       else {
         resp = '0';
       }
+    }
+    else if(cmd == '=') {
+      resp = output_states[arg] ? '1':'0';
     }
     else {
       resp = '?';

@@ -2,7 +2,7 @@ import time
 
 import serial
 
-
+# must remain in sync with the order in `const int pins[]` in the arduino code, as it's an index into it
 class Lamps:
     STOP = 0
     LED_0 = 1
@@ -25,7 +25,7 @@ class Lamps:
     LOC = 18
     REMOTE = 19
 
-
+# must remain in sync with `const int ipins[]`
 class Buttons:
     BRAKE_DEPART = 0
     ATO_MAN = 1
@@ -57,6 +57,28 @@ class ADU:
     def pwm_value(self, mph):
         mph += mph * self.calib[2]
         return round(self.calib[0] * mph ** self.calib[1])
+    
+    def read_button(self, button):
+        return self.send('?', button) == b'1'
+    
+    def read_lamp(self, lamp):
+        return self.send('=', lamp) == b'1'
+    
+    def on_lamp(self, lamp):
+        return self.send("+", lamp)
+    
+    def off_lamp(self, lamp):
+        return self.send("-", lamp)
+    
+    def set_speed(self, mph):
+        return self.send("/", self.pwm_value(mph))
+    
+    def speed_lamps(self, mph):
+        for speed, pin in lamp_map.items():
+            if mph >= speed:
+                self.on_lamp(pin)
+            else:
+                self.off_lamp(pin)
 
 
 def lamps(x):
@@ -67,28 +89,32 @@ def lamps(x):
             s.write(bytes([ord("-"), pin, 0x20]))
 
 
-s = serial.Serial("/dev/ttyUSB0", 9600)
+def main():
+    s = serial.Serial("/dev/ttyUSB0", 9600)
+    
+    if False:
+        while True:
+            time.sleep(3)
+            for i in range(0, 81):
+                s.write(bytes([0x2F, pwm_value(i), 0x20]))
+                lamps(i)
+                time.sleep(0.15)
+    
+            time.sleep(3)
+            for i in range(80, 0, -1):
+                s.write(bytes([0x2F, pwm_value(i), 0x20]))
+                lamps(i)
+                time.sleep(0.15)
+    
+    
+    # while True:
+        # n = int(input())
+        # if n == -1:
+            # break
+        # s.write(bytes([0x2F, pwm_value(n), 0x20]))
+        # lamps(n)
+    
+    s.close()
 
-if False:
-    while True:
-        time.sleep(3)
-        for i in range(0, 81):
-            s.write(bytes([0x2F, pwm_value(i), 0x20]))
-            lamps(i)
-            time.sleep(0.15)
-
-        time.sleep(3)
-        for i in range(80, 0, -1):
-            s.write(bytes([0x2F, pwm_value(i), 0x20]))
-            lamps(i)
-            time.sleep(0.15)
-
-
-while True:
-    n = int(input())
-    if n == -1:
-        break
-    s.write(bytes([0x2F, pwm_value(n), 0x20]))
-    lamps(n)
-
-s.close()
+if __name__ == "__main__":
+    main()
