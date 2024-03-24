@@ -13,7 +13,7 @@ from lxml import etree
 from numpy import arccos, array, cross, dot, pi
 from numpy.linalg import norm
 
-from ..adu import ADU
+from ..adu import ADU, Lamps
 
 LOOKUP_PREC = 3
 NEIGHBORS = [(x, y) for x in range(-2, 3) for y in range(-2, 3)]
@@ -110,7 +110,7 @@ class Point:
         return result
 
     @functools.cache
-    def nearby_ways(self):
+    def nearby_ways(self, eligible_only=False):
         seen_ways = {}
         done_ways = set()
 
@@ -118,6 +118,9 @@ class Point:
 
         for _, node in self.nearby_nodes():
             for way in node.ways:
+                if eligible_only and not way.eligible:
+                    continue
+
                 if way in done_ways:
                     continue
 
@@ -173,6 +176,11 @@ class Way:
             elif el.tag == "tag":
                 self.tags[el.get("k")] = el.get("v")
 
+        self.eligible = (
+            self.tags.get("highway")
+            in "motorway trunk primary secondary tertiary".split()
+        )
+
     def update_nodes(self):
         for node in self.nodes:
             node.ways.add(self)
@@ -191,13 +199,13 @@ def snap_to_way(pts):
 
     min_dists = []
     for pt in pts:
-        near_ways = pt.nearby_ways()
+        near_ways = pt.nearby_ways(eligible_only=True)
         if near_ways:
             min_dists.append(near_ways[0][0])
 
     threshold = max(min_dists) * 2
     for pt in pts:
-        for dist, way in pt.nearby_ways():
+        for dist, way in pt.nearby_ways(eligible_only=True):
             if dist > threshold:
                 continue
 
@@ -239,6 +247,64 @@ points = []
 adu = ADU("/dev/ttyUSB0")
 
 
+class Debounce:
+    def __init__(self):
+        self.current = None
+        self.history = []
+
+    def add(self, x):
+        if self.current is None:
+            self.current = x
+
+        self.history.append(x)
+
+        if len(self.history) > 3:
+            self.history.pop(0)
+
+        if self.current in self.history:
+            return
+
+        q = collections.Counter(self.history)
+        x, c = q.most_common()[0]
+        if c >= 2:
+            self.current = x
+
+        elif c >= 1 and x is not None:
+            self.current = x
+
+
+class Speed:
+    def __init__(self):
+        self.last = 0
+        self.pos = (0, 0)
+
+        self.speed = 0
+        self.m = 0
+
+    def update(self, pos):
+        if self.pos == (0, 0):
+            self.pos = pos
+            self.last = time.time()
+            return
+
+        m_dist = dist(self.pos, pos)
+        print(self.pos, pos, m_dist, self.last, time.time())
+
+        t = (time.time() - self.last) / 3600
+        self.speed = (m_dist / (1609.344)) / t
+
+        self.pos = pos
+        self.last = time.time()
+
+        self.m = max(self.m, self.speed)
+
+        print("speed update", self.speed)
+
+
+debounce = Debounce()
+gps_speed = Speed()
+
+
 def on_position(_client, _userdata, msg):
     data = json.loads(msg.payload.decode())
     if data["_type"] != "location":
@@ -248,10 +314,15 @@ def on_position(_client, _userdata, msg):
         if dist((points[-1].lon, points[-1].lat), (data["lon"], data["lat"])) <= 10:
             return
 
+    gps_speed.update((data["lon"], data["lat"]))
+
     points.append(Point(data["lat"], data["lon"]))
 
     if len(points) > 6:
         points.pop(0)
+
+    if gps_speed.m <= 10:
+        return
 
     ways = snap_to_way(points)
     if ways:
@@ -259,10 +330,17 @@ def on_position(_client, _userdata, msg):
         name = way.tags.get("name", "(none)")
         ref = way.tags.get("ref", "(none)")
         speed = way.tags.get("maxspeed")
+        # adu.off_lamp(Lamps.YARD_10)
 
         if speed:
             speed = int(speed.split()[0])
-            adu.speed_lamps(speed, exact=True)
+            debounce.add(speed)
+
+        else:
+            debounce.add(None)
+
+        if debounce.current:
+            adu.speed_lamps(debounce.current, exact=True)
         else:
             adu.no_speed_lamps()
 
@@ -293,12 +371,13 @@ if __name__ == "__main__":
     if obdc.status() == obd.OBDStatus.NOT_CONNECTED:
         sys.exit(4)
 
-    speed = obdc.query(obd.commands.SPEED)
-    print("obd speed is", speed)
+    # speed = obdc.query(obd.commands.SPEED)
+    # print("obd speed is", speed)
 
+    time.sleep(1)
+    adu.on_lamp(Lamps.YARD_10)
+    check = False
     while True:
-        adu.on_lamp(18)
-        adu.on_lamp(19)
         speed = obdc.query(obd.commands.SPEED)
 
         if speed.value is None:
@@ -306,7 +385,14 @@ if __name__ == "__main__":
             obdc = obd.OBD("/dev/rfcomm1", fast=False, start_low_power=True)
             continue
 
-        adu.set_speed(int(round(speed.value.to("mph").m)))
-        mqtt.loop()
+        adu.set_speed(qsx := int(round(speed.value.to("mph").m)))
+        if qsx > 10:
+            check = True
+            adu.off_lamp(Lamps.YARD_10)
+
+        adu.set_speed(int(qsx))
+
+        if check:
+            mqtt.loop()
 
         time.sleep(0.1)

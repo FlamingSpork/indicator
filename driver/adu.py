@@ -57,7 +57,8 @@ class ADU:
             print("ADU reconnect")
             self.conn.close()
 
-        self.conn = serial.Serial(self.port, 9600, timeout=0.2)
+        self.conn = serial.Serial(self.port, 9600, timeout=1)
+        time.sleep(5)
 
     def send(self, cmd, arg):
         assert self.conn is not None
@@ -96,11 +97,16 @@ class ADU:
     def speed_lamps(self, mph, exact=False):
         iter_over = reversed(sorted(lamp_map.items()))
 
+        done = False
         for speed, pin in iter_over:
-            if mph >= speed:
-                self.on_lamp(pin)
-                if exact:
-                    break
+            if mph >= speed or mph == 60 and speed > 60:
+                if not exact or not done:
+                    self.on_lamp(pin)
+
+                if exact and done:
+                    self.off_lamp(pin)
+
+                done = True
 
             else:
                 self.off_lamp(pin)
